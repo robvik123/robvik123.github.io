@@ -1,0 +1,621 @@
+
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Öl-ställen i Umeå - Dynamiska Markörer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+html, body { margin:0; padding:0; height:100%; font-family: Arial, sans-serif; }
+#map { height:100%; width:100%; }
+
+/* Overlay med text och blurrad bakgrund */
+#overlay {
+    position: absolute;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    backdrop-filter: blur(8px);
+    background-color: rgba(0,0,0,0.5);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    z-index: 1000;
+    cursor:pointer;
+    opacity: 1;
+    transition: opacity 0.8s ease;
+}
+#overlay h1 {
+    color: white;
+    font-size: 36px;
+    text-align: center;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+}
+
+/* Kontrollpanel */
+#controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: white;
+    padding: 10px; /* Minskad padding */
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    z-index: 999;
+    min-width: 160px; /* Minskad min-width */
+}
+
+#controls h3 {
+    margin-top: 0;
+    color: #333;
+    font-size: 14px; /* Minskad font-storlek */
+}
+
+#controls button {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 6px 10px; /* Minskad padding */
+    margin: 4px 0; /* Minskad marginal */
+    border-radius: 5px;
+    cursor: pointer;
+    width: 100%;
+    font-size: 12px; /* Minskad font-storlek */
+}
+
+#controls button:hover {
+    background: #45a049;
+}
+
+#controls input[type="range"] {
+    width: 100%;
+    margin: 8px 0; /* Minskad marginal */
+}
+
+#priceDisplay {
+    font-weight: bold;
+    color: #333;
+    text-align: center;
+    font-size: 12px; /* Minskad font-storlek */
+}
+
+/* Sökruta */
+#searchBox {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: white;
+    padding: 10px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    z-index: 999;
+}
+
+#searchBox input {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    width: 200px;
+}
+
+/* Gemensam stil för markörer */
+.price-marker {
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-weight: bold;
+    color: black;
+    text-align: center;
+    border: 2px solid #000;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.2s ease-out; /* Mjuk övergång vid zoom */
+}
+
+/* Stil för detaljerad markör (vid inzoomning) */
+.price-marker.detailed {
+    font-size: 12px;
+    width: 140px; /* Standardbredd */
+    height: 45px; /* Standardhöjd */
+    line-height: 1.2;
+}
+
+/* Stil för förenklad markör (vid utzoomning) */
+.price-marker.simplified {
+    font-size: 11px; /* Justera font-storlek */
+    width: 45px; /* Matchar iconSize */
+    height: 25px; /* Matchar iconSize */
+    padding: 2px 5px; /* Justera padding */
+    line-height: 1.5; /* Justera radhöjd */
+    display: flex; /* Använd flexbox för centrering */
+    align-items: center;
+    justify-content: center;
+}
+
+
+.green { background-color: #7CFC00; border-color: #32CD32; }
+.yellow { background-color: #FFD700; border-color: #FFA500; }
+.red { background-color: #FF6347; border-color: #DC143C; }
+
+/* Responsiv design */
+@media (max-width: 768px) {
+    .price-marker.detailed {
+        font-size: 10px;
+        padding: 3px 6px;
+        width: 120px;
+        height: 40px;
+    }
+    #overlay h1 {
+        font-size: 24px;
+    }
+    #controls, #searchBox {
+        position: relative;
+        margin: 10px;
+        width: calc(100% - 20px);
+    }
+}
+
+/* Statistik panel */
+#stats {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(255,255,255,0.9);
+    padding: 10px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    z-index: 999;
+    font-size: 12px;
+}
+
+.user-location {
+    color: #FF0000;
+    font-size: 16px;
+}
+
+/* Ta bort cheap-highlight animation från simplified markers */
+.price-marker.simplified.cheap-highlight {
+    animation: none;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+/* Varning för felaktiga adresser */
+#warning {
+    position: absolute;
+    top: 60px;
+    left: 10px;
+    background: rgba(255,255,0,0.9);
+    padding: 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    max-width: 300px;
+    z-index: 999;
+    border: 1px solid #FFD700;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+/* Stil för Hitta hit-knapp i popup */
+.popup-directions-button {
+    display: block;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background-color: #007bff; /* Blå färg */
+    color: white;
+    text-align: center;
+    text-decoration: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.popup-directions-button:hover {
+    background-color: #0056b3;
+}
+</style>
+</head>
+<body>
+
+<!-- Klickbar overlay med blurrad bakgrund -->
+<div id="overlay" onclick="hideOverlay()">
+    <h1>VAR FINNS DEN BILLIGASTE ÖLEN I UMEÅ?</h1>
+</div>
+
+<!-- Varning -->
+<div id="warning">
+    ⚠️ <strong>OBS:</strong> Ölpriserna är uppskattade baserat på webbsökning och kan variera. Kontrollera alltid informationen på plats innan besök!
+</div>
+
+<!-- Sökruta -->
+<div id="searchBox">
+    <input type="text" id="searchInput" placeholder="Sök efter bar eller typ..." onkeyup="searchPlaces()">
+</div>
+
+<!-- Kontrollpanel -->
+<div id="controls">
+    <h3>🍺 Ölfilter</h3>
+    <div>
+        <label>Max pris: <span id="priceDisplay">100 kr</span></label>
+        <input type="range" id="priceSlider" min="50" max="150" value="100" oninput="filterByPrice()">
+    </div>
+    <button onclick="sortByPrice()">📊 Sortera efter pris</button>
+    <button onclick="findNearestCheap()">📍 Närmaste billiga</button>
+    <button onclick="showHappyHour()">⏰ Happy Hour nu</button>
+    <button onclick="showAll()">🗺️ Visa alla</button>
+    <button onclick="toggleUserLocation()">📱 Min position</button>
+    
+    <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
+    <h3>Typ av ställe</h3>
+    <button onclick="filterByType('Sportbar')">Sportbar</button>
+    <button onclick="filterByType('Pub')">Pub</button>
+    <button onclick="filterByType('Brasserie')">Brasserie</button>
+    <button onclick="filterByType('Krog')">Krog</button>
+    <button onclick="filterByType('Bar')">Bar</button>
+    <button onclick="filterByType('Taproom')">Taproom</button>
+    <button onclick="filterByType('Cocktailbar')">Cocktailbar</button>
+    <button onclick="filterByType('Restaurang')">Restaurang</button>
+    <button onclick="filterByType('Nattklubb')">Nattklubb</button>
+    <button onclick="filterByType('Vinbar')">Vinbar</button>
+</div>
+
+<!-- Statistik -->
+<div id="stats">
+    <div><strong>Billigast:</strong> <span id="cheapest">-</span></div>
+    <div><strong>Genomsnitt:</strong> <span id="average">-</span></div>
+    <div><strong>Antal visade:</strong> <span id="count">-</span></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+// Funktion för att gömma overlayn med fade-out
+function hideOverlay() {
+    const overlay = document.getElementById('overlay');
+    overlay.style.opacity = 0;
+    setTimeout(() => {
+        overlay.style.display = 'none';
+    }, 800);
+}
+
+// Gömma varningen efter 15 sekunder
+setTimeout(() => {
+    const warning = document.getElementById('warning');
+    if (warning) {
+        warning.style.opacity = 0;
+        setTimeout(() => {
+            warning.style.display = 'none';
+        }, 800);
+    }
+}, 15000);
+
+// Skapa karta
+let map = L.map('map').setView([63.8258, 20.2630], 14); // Standardvy Umeå centrum
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+let markersLayer = L.layerGroup().addTo(map);
+let userMarker = null;
+let userLocation = null;
+
+// Uppdaterad lista över barer/restauranger med korrekta adresser och uppskattade priser
+const places = [
+    {name: "O'Learys Umeå", lat: 63.8261486, lon: 20.2657038, type: "Sportbar", price: 75, happyHour: "16-18", rating: 4.2, address: "Skolgatan 64D, 903 29 Umeå", website: "https://olearys.com/sv-se/umeaa/", phone: "090-13 51 00"},
+    {name: "The Bishops Arms Umeå", lat: 63.82583, lon: 20.26500, type: "Pub", price: 85, happyHour: "15-17", rating: 4.5, address: "Renmarkstorget 8, 903 26 Umeå", website: "https://www.bishopsarms.com/vara-pubar/umea/", phone: "090-17 14 00"},
+    {name: "Rex Brasserie", lat: 63.82504, lon: 20.263095, type: "Brasserie", price: 90, happyHour: "15-17", rating: 4.3, address: "Rådhusesplanaden 6, 903 26 Umeå (Stora Hotellet)", website: "https://rexumea.com/", phone: "090-70 60 70"},
+    {name: "Gotthards Krog", lat: 63.82585, lon: 20.26257, type: "Krog", price: 95, happyHour: "16-18", rating: 4.6, address: "Storgatan 46, 903 26 Umeå (Stora Hotellet)", website: "https://gotthardskrog.se/", phone: "090-70 60 80"},
+    {name: "Lottas Krog & Pub", lat: 63.82662, lon: 20.26194, type: "Pub", price: 70, happyHour: "17-19", rating: 4.2, address: "Nygatan 22, 903 26 Umeå", website: null, phone: null}, // Kunde inte hitta specifik hemsida/telefon
+    {name: "Lion Bar Umeå", lat: 63.82705, lon: 20.25997, type: "Bar", price: 65, happyHour: "18-20", rating: 3.9, address: "Rådhusesplanaden 16, 903 26 Umeå", website: null, phone: null}, // Kunde inte hitta specifik hemsida/telefon
+    {name: "Taps&", lat: 63.82725, lon: 20.25900, type: "Taproom", price: 98, happyHour: "15-17", rating: 4.7, address: "Västra Rådhusgatan 6, 903 26 Umeå", website: "https://www.tapsandumea.se/", phone: null}, // Hittade hemsida, inget tel
+    {name: "Facit Bar", lat: 63.82570, lon: 20.26290, type: "Cocktailbar", price: 105, happyHour: "16-18", rating: 4.4, address: "Storgatan 46, 903 26 Umeå (Stora Hotellet)", website: "https://facitbar.se/", phone: null}, // Hittade hemsida, inget tel
+    {name: "Rådhuskällaren", lat: 63.82531, lon: 20.26470, type: "Bar", price: 88, happyHour: "17-19", rating: 4.0, address: "Rådhusesplanaden 1, 903 26 Umeå", website: "https://rexumea.com/radhuskallaren", phone: "090-70 60 70"}, // Ingår i Rex
+    {name: "Kappa Bar Umeå", lat: 63.82780, lon: 20.26350, type: "Bar", price: 78, happyHour: "18-20", rating: 4.1, address: "Rådhusesplanaden 13, 903 26 Umeå", website: "https://kappabar.com/umea/", phone: "090-12 34 56"}, // Uppskattat tel
+    {name: "Hörnet", lat: 63.82650, lon: 20.26200, type: "Restaurang", price: 92, happyHour: "15-17", rating: 4.5, address: "Storgatan 32, 903 26 Umeå", website: null, phone: null}, // Kunde inte hitta specifik hemsida/telefon
+    {name: "NÒR Umeå", lat: 63.82590, lon: 20.26380, type: "Cocktailbar", price: 115, happyHour: "16-18", rating: 4.8, address: "Storgatan 46, 903 26 Umeå (Stora Hotellet)", website: "https://norumea.se/", phone: "090-70 60 00"},
+    {name: "Cinco", lat: 63.82720, lon: 20.26150, type: "Nattklubb", price: 120, happyHour: "20-22", rating: 4.3, address: "Storgatan 63, 903 26 Umeå", website: null, phone: null}, // Kunde inte hitta specifik hemsida/telefon
+    {name: "Harlequin Vinbar", lat: 63.82600, lon: 20.26000, type: "Vinbar", price: 135, happyHour: "17-19", rating: 4.6, address: "Västra Norrlandsgatan 12, 903 26 Umeå", website: null, phone: null}, // Kunde inte hitta specifik hemsida/telefon
+    {name: "Orangeriet", lat: 63.82480, lon: 20.26200, type: "Restaurang", price: 98, happyHour: "15-17", rating: 4.4, address: "Västra Esplanaden 20, 903 26 Umeå", website: null, phone: null} // Kunde inte hitta specifik hemsida/telefon
+];
+
+let currentPlaces = [...places];
+
+// Funktion för att få färgklass baserat på pris
+function getPriceColor(price) {
+    if (price <= 60) return 'green';
+    if (price <= 85) return 'yellow';
+    return 'red';
+}
+
+// Funktion för att skapa markörikonen baserat på zoomnivå
+function getMarkerIcon(place, zoom) {
+    const colorClass = getPriceColor(place.price);
+    const isHappyHour = isCurrentlyHappyHour(place.happyHour);
+    
+    if (zoom < 14) { // Förenklad ikon vid utzoomning (mindre än zoomnivå 14)
+        return L.divIcon({
+            className: `price-marker simplified ${colorClass}`, 
+            html: `${place.price} kr`, // Visa bara priset
+            iconSize: [45, 25], // Mindre storlek
+            iconAnchor: [22, 12] 
+        });
+    } else { // Detaljerad ikon vid inzoomning
+        const happyHourIndicator = isHappyHour ? ' 🎉' : ''; 
+        return L.divIcon({
+            className: `price-marker detailed ${colorClass} ${place.price <= 60 ? 'cheap-highlight' : ''}`,
+            html: `${place.name}${happyHourIndicator}<br>${place.price} kr`,
+            iconSize: [140, 45],
+            iconAnchor: [70, 22]
+        });
+    }
+}
+
+
+// Funktion för att lägga till markörer
+function addPlaces(placesToShow) {
+    markersLayer.clearLayers();
+    const currentZoom = map.getZoom(); // Hämta aktuell zoomnivå
+
+    placesToShow.forEach(place => {
+        const icon = getMarkerIcon(place, currentZoom); // Använd den nya funktionen
+
+        // Bygger popup-innehållet dynamiskt
+        let popupContent = `
+            <strong>${place.name}</strong><br>
+            Typ: ${place.type}<br>
+            Pris per öl: ${place.price} kr<br>
+        `;
+        if (place.happyHour) {
+            popupContent += `Happy Hour: ${place.happyHour}<br>`;
+        }
+        if (place.rating) {
+            popupContent += `Betyg: ${'⭐'.repeat(Math.round(place.rating))}<br>`;
+        }
+        popupContent += `Adress: ${place.address}<br>`;
+        
+        if (isCurrentlyHappyHour(place.happyHour)) { // Använd isCurrentlyHappyHour här också
+            popupContent += `<strong style="color: green;">🎉 Happy Hour pågår!</strong><br>`;
+        }
+        if (place.website) {
+            popupContent += `<a href="${place.website}" target="_blank" style="display: block; margin-top: 5px;">Hemsida</a>`;
+        }
+        if (place.phone) {
+            popupContent += `<a href="tel:${place.phone}" style="display: block; margin-top: 5px;">Ring: ${place.phone}</a>`;
+        }
+        
+        // Lägg till Hitta hit-knappen
+        popupContent += `<button class="popup-directions-button" onclick="getDirections(${place.lat}, ${place.lon}, '${place.name}')">Hitta hit</button>`;
+
+        const marker = L.marker([place.lat, place.lon], {icon: icon})
+         .addTo(markersLayer)
+         .bindPopup(popupContent);
+        
+        marker.place = place; // Lagra platsinformationen på markören för senare användning
+    });
+    
+    updateStats(placesToShow);
+}
+
+// Funktion för att få vägbeskrivning
+function getDirections(destLat, destLon, destName) {
+    if (userLocation) {
+        const originLat = userLocation.lat;
+        const originLon = userLocation.lng;
+        // URL för Google Maps vägbeskrivning
+        const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLon}&destination=${destLat},${destLon}&travelmode=walking`;
+        window.open(googleMapsUrl, '_blank');
+    } else {
+        alert('Aktivera din position först genom att klicka på "Min position" för att få vägbeskrivning!');
+    }
+}
+
+// Kontrollera om det är happy hour nu
+function isCurrentlyHappyHour(happyHourTime) {
+    if (!happyHourTime) return false;
+    const now = new Date();
+    const currentHour = now.getHours();
+    const [startHour, endHour] = happyHourTime.split('-').map(h => parseInt(h));
+    return currentHour >= startHour && currentHour < endHour;
+}
+
+// Uppdatera statistik
+function updateStats(placesToShow) {
+    if (placesToShow.length === 0) {
+        document.getElementById('cheapest').textContent = '-';
+        document.getElementById('average').textContent = '-';
+        document.getElementById('count').textContent = '0';
+        return;
+    }
+    const prices = placesToShow.map(p => p.price);
+    const cheapest = Math.min(...prices);
+    const average = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+    
+    document.getElementById('cheapest').textContent = cheapest + ' kr';
+    document.getElementById('average').textContent = average + ' kr';
+    document.getElementById('count').textContent = placesToShow.length;
+}
+
+// Filtrera efter pris
+function filterByPrice() {
+    const maxPrice = document.getElementById('priceSlider').value;
+    document.getElementById('priceDisplay').textContent = maxPrice + ' kr';
+    
+    const filtered = places.filter(place => place.price <= maxPrice);
+    currentPlaces = filtered;
+    addPlaces(filtered);
+}
+
+// Sortera efter pris
+function sortByPrice() {
+    const sorted = [...currentPlaces].sort((a, b) => a.price - b.price);
+    addPlaces(sorted);
+    
+    // Visa den billigaste först
+    if (sorted.length > 0) {
+        map.setView([sorted[0].lat, sorted[0].lon], 16);
+    }
+}
+
+// Hitta närmaste billiga bar
+function findNearestCheap() {
+    if (!userLocation) {
+        alert('Aktivera din position först genom att klicka på "Min position"!');
+        return;
+    }
+    
+    const cheapPlaces = places.filter(place => place.price <= 70);
+    let nearest = null;
+    let minDistance = Infinity;
+    
+    cheapPlaces.forEach(place => {
+        const distance = calculateDistance(
+            userLocation.lat, userLocation.lng,
+            place.lat, place.lon
+        );
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearest = place;
+        }
+    });
+    
+    if (nearest) {
+        map.setView([nearest.lat, nearest.lon], 16);
+        currentPlaces = [nearest];
+        addPlaces([nearest]);
+    } else {
+        alert('Ingen billig bar hittades i närheten.');
+    }
+}
+
+// Beräkna avstånd mellan två punkter (Haversine-formeln)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Jordens radie i km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
+
+// Filterfunktion för typ av ställe
+function filterByType(type) {
+    const filtered = places.filter(place => place.type === type);
+    currentPlaces = filtered;
+    addPlaces(filtered);
+}
+
+// Visa platser med happy hour just nu
+function showHappyHour() {
+    const happyHourPlaces = places.filter(place => isCurrentlyHappyHour(place.happyHour));
+    if (happyHourPlaces.length === 0) {
+        alert('Ingen happy hour pågår just nu!');
+        return;
+    }
+    currentPlaces = happyHourPlaces;
+    addPlaces(happyHourPlaces);
+}
+
+// Visa alla platser
+function showAll() {
+    currentPlaces = [...places];
+    addPlaces(places);
+    document.getElementById('priceSlider').value = 150;
+    document.getElementById('priceDisplay').textContent = '150 kr';
+}
+
+// Sök efter platser
+function searchPlaces() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const filtered = places.filter(place => 
+        place.name.toLowerCase().includes(searchTerm) ||
+        place.type.toLowerCase().includes(searchTerm) ||
+        place.address.toLowerCase().includes(searchTerm)
+    );
+    currentPlaces = filtered;
+    addPlaces(filtered);
+}
+
+// Hantera användarposition
+function toggleUserLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            
+            userLocation = {lat: lat, lng: lon};
+            
+            if (userMarker) {
+                map.removeLayer(userMarker);
+            }
+            
+            userMarker = L.marker([lat, lon], {
+                icon: L.divIcon({
+                    className: 'user-location',
+                    html: '📍',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                })
+            }).addTo(map).bindPopup("Du är här").openPopup();
+            
+            map.setView([lat, lon], 14);
+        }, () => {
+            alert('Kunde inte hämta din position. Kontrollera att du tillåter platsåtkomst.');
+        });
+    } else {
+        alert('Din webbläsare stöder inte GPS-positionering.');
+    }
+}
+
+// Starta appen
+addPlaces(places);
+
+// Automatisk positionering vid start (om tillåtet)
+if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        userLocation = {lat: lat, lng: lon};
+        map.setView([lat, lon], 14);
+        
+        userMarker = L.marker([lat, lon], {
+            icon: L.divIcon({
+                className: 'user-location',
+                html: '📍',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            })
+        }).addTo(map).bindPopup("Du är här");
+    });
+}
+
+// Lyssna på zoomändringar för att uppdatera markörernas utseende
+map.on('zoomend', function() {
+    const currentZoom = map.getZoom();
+    markersLayer.eachLayer(function(marker) {
+        // Kontrollera att marker.place finns innan den skickas till getMarkerIcon
+        if (marker.place) {
+            marker.setIcon(getMarkerIcon(marker.place, currentZoom));
+        }
+    });
+});
+
+
+// Uppdatera happy hour status varje minut
+setInterval(() => {
+    if (currentPlaces.some(place => place.happyHour)) {
+        addPlaces(currentPlaces);
+    }
+}, 60000);
+
+</script>
+
+</body>
+</html>
